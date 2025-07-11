@@ -1,89 +1,153 @@
-const express = require('express');
-require('dotenv').config();
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>タイピングバトル</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #game { display: none; margin-top: 20px; }
+    #text { font-size: 18px; margin-bottom: 10px; }
+    #input { width: 100%; height: 80px; font-size: 16px; }
+    #controls button { margin-right: 10px; }
+    #result { font-size: 20px; font-weight: bold; margin-top: 10px; }
+  </style>
+</head>
+<body>
 
-const app = express();
+  <!-- ルーム選択／練習モード -->
+  <div id="room-select">
+    <div id="controls">
+      <label>ルームID：<input id="roomId" placeholder="任意の文字列" /></label>
+      <button id="joinBtn">対戦モード</button>
+      <button id="practiceBtn">練習モード</button>
+    </div>
+  </div>
 
-// serve everything under <project‑root>/tsuntsun as /static
-app.use('', express.static(path.join(__dirname, 'public')));
+  <!-- ゲーム画面 -->
+  <div id="game">
+    <p id="text"></p>
+    <textarea id="input" disabled placeholder="ここに入力してください…"></textarea>
+    <div>
+      <p>あなたの進捗: <span id="myProgress">0%</span></p>
+      <p>相手の進捗: <span id="oppProgress">0%</span></p>
+    </div>
+    <p id="result"></p>
+  </div>
 
-const server = http.createServer(app);
-const io = new Server(server);
+  <script>
+    const socket = io();
+    let startTime;
+    let isPractice = false;
 
-// ルームごとにプレイヤー情報（進捗・所要時間）を管理
-const rooms = {};
+    // テキスト例をクライアントにも用意
+    const texts = [
+      "速く正確にタイピングしましょう。",
+      "Socket.io を使うとリアルタイム通信が簡単です。",
+      "タイプバトルで勝利を目指そう！",
+      "JavaScript で楽しくプロジェクトを構築！"
+    ];
+    function randomText() {
+      return texts[Math.floor(Math.random() * texts.length)];
+    }
 
-// 日本語テキスト例
-const texts = [
-    '速く正確にタイピングしましょう。',
-    'Socket.io を使うとリアルタイム通信が簡単です。',
-    'タイプバトルで勝利を目指そう！',
-    'JavaScript で楽しくプロジェクトを構築！',
-];
-function generateText() {
-    return texts[Math.floor(Math.random() * texts.length)];
-}
+    // UI 表示切替
+    function showGame() {
+      document.getElementById('room-select').style.display = 'none';
+      document.getElementById('game').style.display = 'block';
+      document.getElementById('result').textContent = '';
+      document.getElementById('oppProgress').textContent = '0%';
+      document.getElementById('myProgress').textContent = '0%';
+    }
 
-io.on('connection', (socket) => {
-    let currentRoom = null;
+    // 対戦モード開始
+    document.getElementById('joinBtn').onclick = () => {
+      isPractice = false;
+      const roomId = document.getElementById('roomId').value || Date.now().toString();
+      socket.emit('join_room', roomId);
+      showGame();
+    };
 
-    // ルーム参加／作成
-    socket.on('join_room', (roomId) => {
-        currentRoom = roomId;
-        socket.join(roomId);
+    // 練習モード開始
+    document.getElementById('practiceBtn').onclick = () => {
+      isPractice = true;
+      const text = randomText();
+      setupPractice(text);
+      showGame();
+    };
 
-        if (!rooms[roomId]) {
-            rooms[roomId] = { players: {} };
+    // 練習モード用セットアップ
+    function setupPractice(text) {
+      document.getElementById('text').textContent = text;
+      const input = document.getElementById('input');
+      input.value = '';
+      input.disabled = false;
+      input.focus();
+      startTime = Date.now();
+
+      // 練習専用ハンドラに切り替え
+      input.oninput = e => {
+        const target = document.getElementById('text').textContent;
+        const entered = e.target.value;
+        let correct = 0;
+        for (let i = 0; i < entered.length; i++) {
+          if (entered[i] === target[i]) correct++;
         }
-        rooms[roomId].players[socket.id] = { progress: 0, time: 0 };
+        const progress = Math.floor((correct / target.length) * 100);
+        document.getElementById('myProgress').textContent = progress + '%';
 
-        // プレイヤーが2人揃ったら対戦開始
-        const count = Object.keys(rooms[roomId].players).length;
-        if (count === 2) {
-            const text = generateText();
-            io.to(roomId).emit('start', { text });
+        if (progress >= 100) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+          document.getElementById('result').textContent = `練習完了！所要時間: ${elapsed} 秒`;
+          input.disabled = true;
         }
+      };
+    }
+
+    // 対戦モード用入力ハンドラ（共通）
+    document.getElementById('input').oninput = e => {
+      if (isPractice) return;  // 練習モード時は無視
+      const target = document.getElementById('text').textContent;
+      const entered = e.target.value;
+      let correct = 0;
+      for (let i = 0; i < entered.length; i++) {
+        if (entered[i] === target[i]) correct++;
+      }
+      const progress = Math.floor((correct / target.length) * 100);
+      const elapsed = Date.now() - startTime;
+      socket.emit('progress', { progress, time: elapsed });
+      document.getElementById('myProgress').textContent = progress + '%';
+    };
+
+    // 対戦モード：開始イベント受信
+    socket.on('start', ({ text }) => {
+      if (isPractice) return;
+      document.getElementById('text').textContent = text;
+      const input = document.getElementById('input');
+      input.value = '';
+      input.disabled = false;
+      input.focus();
+      startTime = Date.now();
     });
 
-    // 進捗＆経過時間を受信
-    socket.on('progress', ({ progress, time }) => {
-        if (!currentRoom) return;
-        const room = rooms[currentRoom];
-        room.players[socket.id].progress = progress;
-        room.players[socket.id].time = time;
-
-        // 全員の進捗をブロードキャスト
-        const players = Object.entries(room.players).map(([id, info]) => ({
-            id,
-            progress: info.progress,
-            time: info.time,
-        }));
-        io.to(currentRoom).emit('update', players);
-
-        // 両者100%到達で勝敗判定
-        if (players.every((p) => p.progress >= 100)) {
-            const [a, b] = players;
-            const winner = a.time < b.time ? a.id : b.id;
-            io.to(currentRoom).emit('finish', { winner });
-            delete rooms[currentRoom];
-        }
+    // 対戦モード：進捗更新受信
+    socket.on('update', players => {
+      if (isPractice) return;
+      const opp = players.find(p => p.id !== socket.id);
+      if (opp) {
+        document.getElementById('oppProgress').textContent = opp.progress + '%';
+      }
     });
 
-    // 切断時のルームクリーニング
-    socket.on('disconnect', () => {
-        if (!currentRoom) return;
-        const room = rooms[currentRoom];
-        if (!room) return;
-        delete room.players[socket.id];
-        if (Object.keys(room.players).length === 0) {
-            delete rooms[currentRoom];
-        }
+    // 対戦モード：勝敗判定受信
+    socket.on('finish', ({ winner }) => {
+      if (isPractice) return;
+      const youWin = winner === socket.id;
+      document.getElementById('result').textContent = youWin
+        ? '🎉 あなたの勝ち！'
+        : '😢 相手の勝ち…';
+      document.getElementById('input').disabled = true;
     });
-});
-
-const PORT = process.env.PORT ?? 10000;
-server.listen(PORT, () => {
-    console.log(`サーバーを http://localhost:${PORT} で起動しました`);
-});
+  </script>
+</body>
+</html>
