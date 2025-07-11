@@ -1,0 +1,9 @@
+services:
+  # Node.js web service
+  - type: web
+    plan: free
+    name: typing-battle
+    env: node
+    buildCommand: npm i
+    startCommand: npm start
+    
