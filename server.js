@@ -1,14 +1,12 @@
-// server.js
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 
-// Express で public フォルダを静的ファイルとして配信
 const app = express();
-app.use(express.static('./tsuntsun'));
-// app.get('/',(req,res) => {
-//   res.send('Hello World!');
-// });
+
+// serve everything under <project‑root>/tsuntsun as /static
+app.use(express.static(path.join(__dirname, 'tsuntsun')));
 
 const server = http.createServer(app);
 const io = new Server(server);
